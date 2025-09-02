@@ -9,28 +9,12 @@ from ultralytics import YOLO
 mp_pose = mp.solutions.pose # mediapipe 姿勢偵測
 mp_drawing = mp.solutions.drawing_utils # mediapipe 繪圖方法
 mp_drawing_styles = mp.solutions.drawing_styles # mediapipe 繪圖樣式
+yolo_model = YOLO('yolov8n.pt')  # YOLO 初始化，使用輕量版模型，也可用 yolov8s.pt, yolov8m.pt
 
-# YOLO 初始化
-yolo_model = YOLO('yolov8n.pt')  # 使用輕量版模型，也可用 yolov8s.pt, yolov8m.pt
-
-# 教練的角度資料(數字欄位自動轉成數字格式)
-# 影片路徑，分別是教練資料，以及真實老人運動情形之影片
-coach_data = pd.read_csv(r"C:\Users\e6797\OneDrive\Desktop\VR虛擬教練\第一週-分析\手臂伸展分析.csv")
-video_path = r"C:\Users\e6797\OneDrive\Desktop\VR虛擬教練\第一週\手臂伸展.mp4"
-cap = cv2.VideoCapture(video_path) # 將原本的鏡頭捕捉改成捕捉影片
-
-# 設定視覺顯示參數
-SHOW_VISUAL = True  # 是否顯示視覺化窗口
-SAVE_SAMPLE_FRAMES = True  # 是否保存部分分析結果圖片
-
-# 存儲所有幀的姿勢數據
-all_people_data = []
-frame_data = []
-feedback_display_timer = {}  # 操控訊息停留時間
-
+#================= 各個函示 ====================
 """計算手臂彎曲角度（相對於垂直線）"""
-# 計算手肘處的彎曲角度的函數(肩膀->手肘->手腕)
 def calculate_angle(p1, p2, p3):
+    # 計算手肘處的彎曲角度的函數(肩膀->手肘->手腕)
     v1 = np.array([p1[0] - p2[0], p1[1] - p2[1]])# 從手肘指向肩膀的向量(x，y)
     v2 = np.array([p3[0] - p2[0], p3[1] - p2[1]])# 從手肘指向手腕的向量
     
@@ -41,8 +25,8 @@ def calculate_angle(p1, p2, p3):
     return np.degrees(angle)
 
 """計算軀幹角度（相對於垂直線）"""
-# 計算軀幹向量與垂直線之間的角度，小角度(輕微前傾或後仰)，0角度(軀幹完全垂直)，大角度(明顯的身體傾斜)
 def calculate_trunk_angle(left_shoulder, right_shoulder, left_hip, right_hip):
+    # 計算軀幹向量與垂直線之間的角度，小角度(輕微前傾或後仰)，0角度(軀幹完全垂直)，大角度(明顯的身體傾斜)
     # 計算肩部中點和髖部中點
     shoulder_mid = [(left_shoulder[0] + right_shoulder[0])/2, (left_shoulder[1] + right_shoulder[1])/2]
     hip_mid = [(left_hip[0] + right_hip[0])/2, (left_hip[1] + right_hip[1])/2]
@@ -68,8 +52,8 @@ def calculate_head_angle(nose, left_ear, right_ear):
     return np.degrees(angle)
 
 """計算肩部角度（手臂舉高角度）- 以軀幹為基準"""
-# 肩部角度：0°為手臂垂直向下，90°為水平，180°為舉手過頭
 def calculate_shoulder_angle(shoulder, elbow, hip):
+    # 肩部角度：0°為手臂垂直向下，90°為水平，180°為舉手過頭
     # 計算手臂向量（肩膀到手肘）
     arm_vector = np.array([elbow[0] - shoulder[0], elbow[1] - shoulder[1]])
     # 計算軀幹向量（肩膀到髖部，向下為基準）
@@ -81,8 +65,8 @@ def calculate_shoulder_angle(shoulder, elbow, hip):
     return np.degrees(angle)
 
 """計算膝部彎曲角度"""
-# 膝部角度：180°為腿部完全伸直，角度越小表示膝蓋彎曲越多
 def calculate_knee_angle(hip, knee, ankle):
+    # 膝部角度：180°為腿部完全伸直，角度越小表示膝蓋彎曲越多
     # 計算大腿向量（髖部到膝蓋）
     thigh_vector = np.array([knee[0] - hip[0], knee[1] - hip[1]])
     # 計算小腿向量（膝蓋到腳踝）
@@ -311,140 +295,165 @@ def calculate_comprehensive_similarity(user_angles, user_previous_angles, coach_
                 }
                 chinese_name = angle_chinese.get(angle_name, angle_name)
                 feedback_messages.append(f"{chinese_name}")
-    
     # 將反饋訊息加入回傳結果
     all_scores['feedback_messages'] = feedback_messages
     return final_score, all_scores
 
+#==================== 主要程式開始 =====================
+cap = cv2.VideoCapture(0) # 鏡頭捕捉影片
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 960) # 設定解析度
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 540)
+cap.set(cv2.CAP_PROP_FPS, 30) # 設定幀率
+
 angle_status_tracker = {} # 全域變數 - 追蹤各角度的連續狀態
 user_previous_angles = {}  # {track_id: previous_angles}
+all_people_data = [] # 存儲所有幀的姿勢數據
+feedback_display_timer = {}  # 操控訊息停留時間
+
+SYSTEM_STATE = "PREVIEW"  # 有分正式開始記錄跟預錄
+recording_started = False
+coach_video_start_time = None
+SHOW_VISUAL = True  # 是否顯示視覺化窗口
+SAVE_SAMPLE_FRAMES = True  # 是否保存部分分析結果圖片
+
+# 教練影片初始化（但不開始播放）
+coach_data = pd.read_csv(r"C:\Users\e6797\OneDrive\Desktop\VR虛擬教練\第一週-分析\手臂伸展分析.csv") # 教練的角度資料
+coach_video_path = r"C:\Users\e6797\OneDrive\Desktop\VR虛擬教練\第一週\手臂伸展_已剪輯.mp4"
+coach_cap = cv2.VideoCapture(coach_video_path)
+coach_fps = coach_cap.get(cv2.CAP_PROP_FPS)
+
 # min_detection_confidence 小時容易檢測到人，但可能有誤判，大則相反(最大為1)
 # min_tracking_confidence 當已經鎖定人物後，用來判斷是否繼續追蹤的信心值。數值小追蹤較不穩定，容易重新檢測，反之
+# 穩定環境之坐姿運動(建議 0.7，0.5) 。光線不佳或多人環境(建議0.4，0.4)
 with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.8) as pose:
-    # 穩定環境之坐姿運動(建議 0.7，0.5) 。光線不佳或多人環境(建議0.4，0.4)
+    
     if not cap.isOpened(): # 無法開啟影片檔案
         print("Cannot open camera")
         exit()
     
-    # 影片的總幀數跟每秒幀數
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
     frame_count = 0
+    start_time = time.time()
     
     while True:
         ret, frame = cap.read()
         if not ret: 
             break
-        
+        frame = cv2.flip(frame, 1)  # 水平翻轉，讓動作更直觀
         frame_count += 1
-        print(f"處理進度: {frame_count}/{total_frames} ({frame_count/total_frames*100:.1f}%)", end='\r')
-        
-        # 可以調整影像大小以提高處理速度，但大小會影響捕捉的精準度
-        display_frame = cv2.resize(frame, (540, 960))
+        display_frame = frame
 
-        # 第一步：用YOLO偵測人物(檢測+追蹤)
-        yolo_results = yolo_model.track(display_frame, tracker="bytetrack.yaml")
+        if SYSTEM_STATE == "PREVIEW":
+            # 只做即時顯示，不記錄數據
+            current_timestamp = None
 
-        # 提取人物的bounding boxes  
-        person_boxes = []
-        for result in yolo_results:
-            for box in result.boxes:
-                if box.cls == 0:  # class 0 是 'person'
-                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
-                    confidence = box.conf[0].cpu().numpy()
-                    
-                    # 重點：正確提取 track_id
-                    if hasattr(box, 'id') and box.id is not None:
-                        track_id = int(box.id[0].cpu().numpy())
-                    else:
-                        track_id = -1  # 如果沒有追蹤ID，使用-1表示
-                    
-                    if confidence > 0.5:  # 信心度閾值
-                        person_boxes.append((x1, y1, x2, y2, confidence, track_id))
-
-        # 顯示視覺化處理
-        if SHOW_VISUAL or SAVE_SAMPLE_FRAMES:
+        elif SYSTEM_STATE == "RECORDING":
+            # 開始記錄並播放教練影片
+            if not recording_started:
+                recording_started = True
+                coach_video_start_time = time.time()
+                record_start_time = time.time()
+            current_timestamp = time.time() - start_time
             
-            # 先繪製YOLO偵測框
-            for x1, y1, x2, y2, conf, track_id in person_boxes:
-                cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                label = f"ID:{track_id} ({conf:.2f})"
-                cv2.putText(display_frame, label, (x1, y1-10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-        
-        # 第二步：對每個人分別進行MediaPipe姿勢分析
-        frame_people_data = []
-        for x1, y1, x2, y2, conf, track_id in person_boxes:
-            # 擴展bounding box以確保完整包含人物
-            padding = 20
-            x1_crop = max(0, x1 - padding)
-            y1_crop = max(0, y1 - padding)
-            x2_crop = min(display_frame.shape[1], x2 + padding)
-            y2_crop = min(display_frame.shape[0], y2 + padding)
-            
-            # 裁切人物區域
-            person_crop = display_frame[y1_crop:y2_crop, x1_crop:x2_crop]
-            
-            if person_crop.size > 0:
-                # 轉換顏色空間並進行姿勢偵測
-                rgb_crop = cv2.cvtColor(person_crop, cv2.COLOR_BGR2RGB)
-                pose_results = pose.process(rgb_crop)
+            # 第一步：用YOLO偵測人物(檢測+追蹤)
+            yolo_results = yolo_model.track(display_frame, tracker="bytetrack.yaml")
 
-                # 視覺化處理
-                if SHOW_VISUAL or SAVE_SAMPLE_FRAMES:
-                    if pose_results.pose_landmarks:
-                        # 在裁切區域繪製骨架
-                        mp_drawing.draw_landmarks(
-                            person_crop,
-                            pose_results.pose_landmarks,
-                            mp_pose.POSE_CONNECTIONS,
-                            landmark_drawing_spec=mp_drawing_styles.get_default_pose_landmarks_style()
-                        )
-                        # 將處理後的區域貼回原圖
-                        display_frame[y1_crop:y2_crop, x1_crop:x2_crop] = person_crop
+            # 提取人物的bounding boxes  
+            person_boxes = []
+            for result in yolo_results:
+                for box in result.boxes:
+                    if box.cls == 0:  # class 0 是 'person'
+                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+                        confidence = box.conf[0].cpu().numpy()
+                        
+                        # 重點：正確提取 track_id
+                        if hasattr(box, 'id') and box.id is not None:
+                            track_id = int(box.id[0].cpu().numpy())
+                        else:
+                            track_id = -1  # 如果沒有追蹤ID，使用-1表示
+                        
+                        if confidence > 0.5:  # 信心度閾值
+                            person_boxes.append((x1, y1, x2, y2, confidence, track_id))
+
+            # 顯示視覺化處理
+            if SHOW_VISUAL or SAVE_SAMPLE_FRAMES:
                 
-                if pose_results.pose_landmarks: # 將MediaPipe結果繪製到原始display_frame上
-                    # 計算角度（使用原始相對座標）
-                    angles = extract_pose_angles(pose_results.pose_landmarks.landmark)
+                # 先繪製YOLO偵測框
+                for x1, y1, x2, y2, conf, track_id in person_boxes:
+                    cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    label = f"ID:{track_id} ({conf:.2f})"
+                    cv2.putText(display_frame, label, (x1, y1-10), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            
+            # 第二步：對每個人分別進行MediaPipe姿勢分析
+            frame_people_data = []
+            detailed_scores = {}
+            for x1, y1, x2, y2, conf, track_id in person_boxes:
+                # 擴展bounding box以確保完整包含人物
+                padding = 20
+                x1_crop = max(0, x1 - padding)
+                y1_crop = max(0, y1 - padding)
+                x2_crop = min(display_frame.shape[1], x2 + padding)
+                y2_crop = min(display_frame.shape[0], y2 + padding)
+                
+                # 裁切人物區域
+                person_crop = display_frame[y1_crop:y2_crop, x1_crop:x2_crop]
+                
+                if person_crop.size > 0:
+                    # 轉換顏色空間並進行姿勢偵測
+                    rgb_crop = cv2.cvtColor(person_crop, cv2.COLOR_BGR2RGB)
+                    pose_results = pose.process(rgb_crop)
 
-                    if angles:
-                        current_timestamp = frame_count / fps
-                        # 取得前一幀的角度資料
-                        prev_angles = user_previous_angles.get(track_id, None)
-                        # 計算綜合相似度（只有在有前一幀資料時才計算）
-                        similarity_score = None
-                        detailed_scores = {}
-                        
-                        if prev_angles is not None:  # 有前一幀資料才能計算
-                            similarity_score, detailed_scores = calculate_comprehensive_similarity(
-                                angles, prev_angles, coach_data, current_timestamp
+                    # 視覺化處理
+                    if SHOW_VISUAL or SAVE_SAMPLE_FRAMES:
+                        if pose_results.pose_landmarks:
+                            # 在裁切區域繪製骨架
+                            mp_drawing.draw_landmarks(
+                                person_crop,
+                                pose_results.pose_landmarks,
+                                mp_pose.POSE_CONNECTIONS,
+                                landmark_drawing_spec=mp_drawing_styles.get_default_pose_landmarks_style()
                             )
-                        
-                        
-                        person_data = {
-                            'frame': frame_count,
-                            'timestamp': current_timestamp,
-                            'track_id': track_id,
-                            **angles,
-                            'pose_detected': True
-                        }
-                        
-                        # 將相似度分數加入資料
-                        if similarity_score is not None:
-                            person_data['similarity_score'] = similarity_score
-                            if isinstance(detailed_scores, dict):
-                                person_data.update(detailed_scores)
-                        
-                        frame_people_data.append(person_data)
-                        # 儲存當前幀作為下一幀的"前一幀"
-                        user_previous_angles[track_id] = angles.copy()
+                            # 將處理後的區域貼回原圖
+                            display_frame[y1_crop:y2_crop, x1_crop:x2_crop] = person_crop
+                    
+                    if pose_results.pose_landmarks: # 將MediaPipe結果繪製到原始display_frame上
+                        # 計算角度（使用原始相對座標）
+                        angles = extract_pose_angles(pose_results.pose_landmarks.landmark)
+
+                        if angles:
+                            prev_angles = user_previous_angles.get(track_id, None)
+                            # 計算綜合相似度（只有在有前一幀資料時才計算）
+                            similarity_score = None
+                            
+                            if prev_angles is not None:  # 有前一幀資料才能計算
+                                similarity_score, detailed_scores = calculate_comprehensive_similarity(
+                                    angles, prev_angles, coach_data, current_timestamp
+                                )
+                            
+                            person_data = {
+                                'frame': frame_count,
+                                'timestamp': current_timestamp,
+                                'track_id': track_id,
+                                **angles,
+                                'pose_detected': True
+                            }
+                            
+                            # 將相似度分數加入資料
+                            if similarity_score is not None:
+                                person_data['similarity_score'] = similarity_score
+                                if isinstance(detailed_scores, dict):
+                                    person_data.update(detailed_scores)
+                            
+                            frame_people_data.append(person_data)
+                            # 儲存當前幀作為下一幀的"前一幀"
+                            user_previous_angles[track_id] = angles.copy()
 
         # 將此幀的所有人物數據加入總數據
         all_people_data.extend(frame_people_data)
 
         # 顯示整體資訊
         if SHOW_VISUAL or SAVE_SAMPLE_FRAMES:
-            cv2.putText(display_frame, f"Time: {frame_count/fps:.1f}s", (10, 30), 
+            cv2.putText(display_frame, f"Time: {current_timestamp:.1f}s", (10, 30), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             # 如果沒有偵測到人，顯示提示
             if len(person_boxes) == 0:
@@ -460,7 +469,6 @@ with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.8
                     messages = detailed_scores['feedback_messages'].split(',')
                 else:
                     feedback_messages = detailed_scores['feedback_messages']
-                current_time = time.time()
 
                 # 將新訊息加入計時器（顯示5秒）
                 for message in feedback_messages:
@@ -482,14 +490,12 @@ with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.8
             cv2.imshow('Multi-Person Pose Analysis', display_frame)
             # 檢查視窗是否被關閉
             key = cv2.waitKey(1) & 0xFF
-            if key == ord('x'):
+            if key == ord('r'):  # 按 'r' 開始記錄
+                SYSTEM_STATE = "RECORDING"
+            elif key == ord('x') or key == 27:
                 break
-            elif key == ord('s'):
-                SHOW_VISUAL = not SHOW_VISUAL
-            elif key == 27:  # ESC鍵也可以退出
-                break    
-            if cv2.getWindowProperty('Multi-Person Pose Analysis', cv2.WND_PROP_VISIBLE) < 1:
-                break    
+            elif key == ord('p'):  # 按 'p' 回到預覽
+                SYSTEM_STATE = "PREVIEW"
 cap.release()
 cv2.destroyAllWindows()
 cv2.waitKey(1)
@@ -500,6 +506,6 @@ print(f"總共偵測到 {len(all_people_data)} 筆人物姿勢數據")
 
 # 保存為CSV
 df = pd.DataFrame(all_people_data)
-csv_filename = f"multi_person_pose_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+csv_filename = f"person_pose_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
 df.to_csv(csv_filename, index=False, encoding='utf-8-sig')
 print(f"CSV 文件已保存: {csv_filename}")
