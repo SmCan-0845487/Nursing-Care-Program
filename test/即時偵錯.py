@@ -319,14 +319,21 @@ SAVE_SAMPLE_FRAMES = True  # 是否保存部分分析結果圖片
 # 教練影片初始化（但不開始播放）
 coach_data = pd.read_csv(r"C:\Users\e6797\OneDrive\Desktop\VR虛擬教練\第一週-分析\手臂伸展分析.csv") # 教練的角度資料
 coach_video_path = r"C:\Users\e6797\OneDrive\Desktop\VR虛擬教練\第一週\手臂伸展_已剪輯.mp4"
-coach_cap = cv2.VideoCapture(coach_video_path)
+coach_cap = cv2.VideoCapture(coach_video_path) 
 coach_fps = coach_cap.get(cv2.CAP_PROP_FPS)
+
+# 讀取第一幀作為預覽用
+coach_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)  # 設定到第一幀
+ret, coach_first_frame = coach_cap.read()
+if ret:
+    coach_preview_frame = cv2.resize(coach_first_frame, (1920, 1080))
+else:
+    coach_preview_frame = None
 
 # min_detection_confidence 小時容易檢測到人，但可能有誤判，大則相反(最大為1)
 # min_tracking_confidence 當已經鎖定人物後，用來判斷是否繼續追蹤的信心值。數值小追蹤較不穩定，容易重新檢測，反之
 # 穩定環境之坐姿運動(建議 0.7，0.5) 。光線不佳或多人環境(建議0.4，0.4)
 with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.8) as pose:
-    
     if not cap.isOpened(): # 無法開啟影片檔案
         print("Cannot open camera")
         exit()
@@ -345,6 +352,28 @@ with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.8
         if SYSTEM_STATE == "PREVIEW":
             # 只做即時顯示，不記錄數據
             current_timestamp = None
+            # 顯示靜態教練影片（第一幀）
+            if coach_preview_frame is not None:
+                cv2.imshow('Coach Video', coach_preview_frame)
+
+            # 仍然要做YOLO偵測和MediaPipe處理來顯示
+            yolo_results = yolo_model.track(display_frame, tracker="bytetrack.yaml")
+            person_boxes = []
+            for result in yolo_results:
+                for box in result.boxes:
+                    if box.cls == 0:  # class 0 是 'person'
+                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+                        confidence = box.conf[0].cpu().numpy()
+                        track_id = int(box.id[0].cpu().numpy()) if hasattr(box, 'id') and box.id is not None else -1
+                        if confidence > 0.5:
+                            person_boxes.append((x1, y1, x2, y2, confidence, track_id))
+            
+            # 視覺化處理（PREVIEW模式也要顯示）
+            for x1, y1, x2, y2, conf, track_id in person_boxes:
+                cv2.rectangle(display_frame, (x1, y1), (x2, y2), (255, 0, 0), 2)  # 藍色框表示預覽模式
+                label = f"PREVIEW ID:{track_id}"
+                cv2.putText(display_frame, label, (x1, y1-10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
         elif SYSTEM_STATE == "RECORDING":
             # 開始記錄並播放教練影片
@@ -352,7 +381,18 @@ with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.8
                 recording_started = True
                 coach_video_start_time = time.time()
                 record_start_time = time.time()
+                coach_cap.set(cv2.CAP_PROP_POS_FRAMES, 0) # 重置影片到開頭
             current_timestamp = time.time() - start_time
+
+            # 計算教練影片應該播放到第幾幀
+            coach_elapsed_time = time.time() - coach_video_start_time
+            coach_frame_number = int(coach_elapsed_time * coach_fps)
+            # 設定教練影片播放位置
+            coach_cap.set(cv2.CAP_PROP_POS_FRAMES, coach_frame_number)
+            coach_ret, coach_frame = coach_cap.read()
+            if coach_ret:# 調整教練影片大小後顯示
+                coach_display = cv2.resize(coach_frame, (1920, 1080))
+                cv2.imshow('Coach Video', coach_display)
             
             # 第一步：用YOLO偵測人物(檢測+追蹤)
             yolo_results = yolo_model.track(display_frame, tracker="bytetrack.yaml")
@@ -364,7 +404,6 @@ with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.8
                     if box.cls == 0:  # class 0 是 'person'
                         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
                         confidence = box.conf[0].cpu().numpy()
-                        
                         # 重點：正確提取 track_id
                         if hasattr(box, 'id') and box.id is not None:
                             track_id = int(box.id[0].cpu().numpy())
@@ -374,10 +413,8 @@ with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.8
                         if confidence > 0.5:  # 信心度閾值
                             person_boxes.append((x1, y1, x2, y2, confidence, track_id))
 
-            # 顯示視覺化處理
-            if SHOW_VISUAL or SAVE_SAMPLE_FRAMES:
-                
-                # 先繪製YOLO偵測框
+            # 先繪製YOLO偵測框
+            if SHOW_VISUAL or SAVE_SAMPLE_FRAMES: 
                 for x1, y1, x2, y2, conf, track_id in person_boxes:
                     cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     label = f"ID:{track_id} ({conf:.2f})"
@@ -419,7 +456,6 @@ with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.8
                     if pose_results.pose_landmarks: # 將MediaPipe結果繪製到原始display_frame上
                         # 計算角度（使用原始相對座標）
                         angles = extract_pose_angles(pose_results.pose_landmarks.landmark)
-
                         if angles:
                             prev_angles = user_previous_angles.get(track_id, None)
                             # 計算綜合相似度（只有在有前一幀資料時才計算）
@@ -448,8 +484,9 @@ with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.8
                             # 儲存當前幀作為下一幀的"前一幀"
                             user_previous_angles[track_id] = angles.copy()
 
-        # 將此幀的所有人物數據加入總數據
-        all_people_data.extend(frame_people_data)
+        # 只在 RECORDING 狀態才記錄數據
+        if SYSTEM_STATE == "RECORDING":
+            all_people_data.extend(frame_people_data)
 
         # 顯示整體資訊
         if SHOW_VISUAL or SAVE_SAMPLE_FRAMES:
@@ -478,7 +515,7 @@ with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.8
                 current_time = time.time()
                 active_messages = []
                 for message, end_time in list(feedback_display_timer.items()):
-                    if current_time < end_time:
+                    if current_time < end_time: 
                         active_messages.append(message)
                     else:
                         del feedback_display_timer[message]  # 清除過期訊息
@@ -491,18 +528,16 @@ with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.8
             # 檢查視窗是否被關閉
             key = cv2.waitKey(1) & 0xFF
             if key == ord('r'):  # 按 'r' 開始記錄
-                SYSTEM_STATE = "RECORDING"
+                if SYSTEM_STATE == "PREVIEW":
+                    SYSTEM_STATE = "RECORDING"
+                    recording_started = False
             elif key == ord('x') or key == 27:
                 break
-            elif key == ord('p'):  # 按 'p' 回到預覽
-                SYSTEM_STATE = "PREVIEW"
+            
 cap.release()
+coach_cap.release()  # 釋放教練影片
 cv2.destroyAllWindows()
 cv2.waitKey(1)
-
-# 保存數據
-print(f"\n分析完成！共處理 {frame_count} 幀")
-print(f"總共偵測到 {len(all_people_data)} 筆人物姿勢數據")
 
 # 保存為CSV
 df = pd.DataFrame(all_people_data)
