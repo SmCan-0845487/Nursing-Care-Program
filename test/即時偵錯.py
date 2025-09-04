@@ -301,8 +301,8 @@ def calculate_comprehensive_similarity(user_angles, user_previous_angles, coach_
 
 #==================== 主要程式開始 =====================
 cap = cv2.VideoCapture(0) # 鏡頭捕捉影片
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 960) # 設定解析度
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 540)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1080) # 設定解析度
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1920)
 cap.set(cv2.CAP_PROP_FPS, 30) # 設定幀率
 
 angle_status_tracker = {} # 全域變數 - 追蹤各角度的連續狀態
@@ -315,6 +315,7 @@ recording_started = False
 coach_video_start_time = None
 SHOW_VISUAL = True  # 是否顯示視覺化窗口
 SAVE_SAMPLE_FRAMES = True  # 是否保存部分分析結果圖片
+current_timestamp = 0
 
 # 教練影片初始化（但不開始播放）
 coach_data = pd.read_csv(r"C:\Users\e6797\OneDrive\Desktop\VR虛擬教練\第一週-分析\手臂伸展分析.csv") # 教練的角度資料
@@ -352,13 +353,17 @@ with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.8
         if SYSTEM_STATE == "PREVIEW":
             # 只做即時顯示，不記錄數據
             current_timestamp = None
+            frame_people_data = []  # 加入這行，確保變數有定義
+            person_boxes = []
+            detailed_scores = {}
+
             # 顯示靜態教練影片（第一幀）
             if coach_preview_frame is not None:
                 cv2.imshow('Coach Video', coach_preview_frame)
 
             # 仍然要做YOLO偵測和MediaPipe處理來顯示
             yolo_results = yolo_model.track(display_frame, tracker="bytetrack.yaml")
-            person_boxes = []
+            
             for result in yolo_results:
                 for box in result.boxes:
                     if box.cls == 0:  # class 0 是 'person'
@@ -374,16 +379,17 @@ with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.8
                 label = f"PREVIEW ID:{track_id}"
                 cv2.putText(display_frame, label, (x1, y1-10), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
-
+                
         elif SYSTEM_STATE == "RECORDING":
+            frame_people_data = []
+            detailed_scores = {}
             # 開始記錄並播放教練影片
             if not recording_started:
                 recording_started = True
                 coach_video_start_time = time.time()
                 record_start_time = time.time()
                 coach_cap.set(cv2.CAP_PROP_POS_FRAMES, 0) # 重置影片到開頭
-            current_timestamp = time.time() - start_time
-
+            current_timestamp = time.time() - record_start_time
             # 計算教練影片應該播放到第幾幀
             coach_elapsed_time = time.time() - coach_video_start_time
             coach_frame_number = int(coach_elapsed_time * coach_fps)
@@ -490,8 +496,10 @@ with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.8
 
         # 顯示整體資訊
         if SHOW_VISUAL or SAVE_SAMPLE_FRAMES:
-            cv2.putText(display_frame, f"Time: {current_timestamp:.1f}s", (10, 30), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            # 只在RECORDING模式且有時間戳記時才顯示時間
+            if SYSTEM_STATE == "RECORDING" and current_timestamp is not None:
+                cv2.putText(display_frame, f"Time: {current_timestamp:.1f}s", (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             # 如果沒有偵測到人，顯示提示
             if len(person_boxes) == 0:
                 cv2.putText(display_frame, "No Person Detected", (10, 120), 
