@@ -6,17 +6,12 @@ import pandas as pd
 from datetime import datetime
 from ultralytics import YOLO
 
-mp_pose = mp.solutions.pose # mediapipe 姿勢偵測
-mp_drawing = mp.solutions.drawing_utils # mediapipe 繪圖方法
-mp_drawing_styles = mp.solutions.drawing_styles # mediapipe 繪圖樣式
-yolo_model = YOLO('yolov8n.pt')  # YOLO 初始化，使用輕量版模型，也可用 yolov8s.pt, yolov8m.pt
-
 #================= 各個函示 ====================
 """計算手臂彎曲角度（相對於垂直線）"""
 def calculate_angle(p1, p2, p3):
     # 計算手肘處的彎曲角度的函數(肩膀->手肘->手腕)
     v1 = np.array([p1[0] - p2[0], p1[1] - p2[1]])# 從手肘指向肩膀的向量(x，y)
-    v2 = np.array([p3[0] - p2[0], p3[1] - p2[1]])# 從手肘指向手腕的向量
+    v2 = np.array([p3[0] - p2[0], p3[1] - p2[1]])# 從手肘指向手腕的向量(x，y)
     
     # 等等要用v1 · v2 = ||v1|| × ||v2|| × cos(θ)，內積跟長度推出cos theta值，再回推角度
     cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
@@ -82,22 +77,22 @@ def extract_pose_angles(landmarks):
     if len(landmarks) < 33:
         return None
     
-    # 提取關鍵點座標
-    left_shoulder = [landmarks[11].x, landmarks[11].y] # 肩膀
-    right_shoulder = [landmarks[12].x, landmarks[12].y]
-    left_elbow = [landmarks[13].x, landmarks[13].y] # 手肘
-    right_elbow = [landmarks[14].x, landmarks[14].y]
-    left_wrist = [landmarks[15].x, landmarks[15].y] # 手腕
-    right_wrist = [landmarks[16].x, landmarks[16].y]
-    left_hip = [landmarks[23].x, landmarks[23].y] # 臀部
-    right_hip = [landmarks[24].x, landmarks[24].y]
+    # 提取關鍵點座標，但因為後面有鏡頭翻轉，這裡故意交換左右
+    right_shoulder = [landmarks[11].x, landmarks[11].y] # 肩膀
+    left_shoulder = [landmarks[12].x, landmarks[12].y]
+    right_elbow = [landmarks[13].x, landmarks[13].y] # 手肘
+    left_elbow = [landmarks[14].x, landmarks[14].y]
+    right_wrist = [landmarks[15].x, landmarks[15].y] # 手腕
+    left_wrist = [landmarks[16].x, landmarks[16].y]
+    right_hip = [landmarks[23].x, landmarks[23].y] # 臀部
+    left_hip = [landmarks[24].x, landmarks[24].y]
     nose = [landmarks[0].x, landmarks[0].y]
-    left_ear = [landmarks[7].x, landmarks[7].y]
-    right_ear = [landmarks[8].x, landmarks[8].y]
-    left_knee = [landmarks[25].x, landmarks[25].y] # 膝蓋
-    right_knee = [landmarks[26].x, landmarks[26].y]
-    left_ankle = [landmarks[27].x, landmarks[27].y] # 腳踝
-    right_ankle = [landmarks[28].x, landmarks[28].y]
+    right_ear = [landmarks[7].x, landmarks[7].y]
+    left_ear = [landmarks[8].x, landmarks[8].y]
+    right_knee = [landmarks[25].x, landmarks[25].y] # 膝蓋
+    left_knee = [landmarks[26].x, landmarks[26].y]
+    right_ankle = [landmarks[27].x, landmarks[27].y] # 腳踝
+    left_ankle = [landmarks[28].x, landmarks[28].y]
     
     try:
         angles = {
@@ -159,7 +154,7 @@ def calculate_direction_similarity(user_angles, user_previous_angles, coach_data
         
         # 比較方向一致性
         if abs(coach_direction) < 1 and abs(user_direction) < 1:
-            direction_score = 90   # 都沒有明顯變化，給基本分
+            direction_score = 80   # 都沒有明顯變化，給基本分
         elif (coach_direction > 0 and user_direction > 0) or (coach_direction < 0 and user_direction < 0):
             direction_score = 100 # 方向一致給 100分
         else:
@@ -194,16 +189,16 @@ def calculate_change_magnitude_similarity(user_angles, user_previous_angles, coa
         
         # 比較變化幅度的相似性
         if coach_change_gap < 1 and user_change_gap < 1:
-            magnitude_score = 90  # 都沒有明顯變化
+            magnitude_score = 80  # 都沒有明顯變化
         else:
             magnitude_diff = abs(coach_change_gap - user_change_gap)
             # 角度是arm或是shoulder時，容忍範圍是5，否則其他為3，因為活動範圍通常比其他部位大
             tolerance = 5 if 'arm' in angle_name or 'shoulder' in angle_name else 3
             similarity = max(0, 1 - magnitude_diff / tolerance)
-            magnitude_score = 50 + similarity * 50 # 範圍：50-100分
+            magnitude_score = 20 + similarity * 80 # 範圍：20-100分
             
         magnitude_scores[f'{angle_name}_magnitude'] = magnitude_score
-    
+
     return magnitude_scores, "Success"
 
 """綜合評分系統（基於前一幀比較）"""
@@ -236,8 +231,8 @@ def calculate_comprehensive_similarity(user_angles, user_previous_angles, coach_
     angle_weights = {
         'left_arm_angle': 0.15,'right_arm_angle': 0.15,
         'trunk_angle': 0.2,'head_tilt_angle': 0.1,
-        'left_shoulder_angle': 0.15,'right_shoulder_angle': 0.15,
-        'left_knee_angle': 0.05,'right_knee_angle': 0.05,
+        'left_shoulder_angle': 0.1,'right_shoulder_angle': 0.1,
+        'left_knee_angle': 0.1,'right_knee_angle': 0.1,
     }
     
     for angle_name, weight in angle_weights.items():
@@ -251,7 +246,6 @@ def calculate_comprehensive_similarity(user_angles, user_previous_angles, coach_
             score_count += weight # 計算加權平均
     
     final_score = total_score / score_count if score_count > 0 else 0
-
     # ========== 反饋偵測邏輯 ==========
     track_id = user_angles.get('track_id', 'default')  # 假設track_id在user_angles中
     
@@ -260,8 +254,8 @@ def calculate_comprehensive_similarity(user_angles, user_previous_angles, coach_
         angle_status_tracker[track_id] = {}
     
     feedback_messages = []
-    LOW_SCORE_THRESHOLD = 60
-    CONSECUTIVE_FRAMES = 6
+    LOW_SCORE_THRESHOLD = 70
+    CONSECUTIVE_FRAMES = 7
     
     for angle_name in angle_weights.keys():
         direction_key = f'{angle_name}_direction'
@@ -283,27 +277,35 @@ def calculate_comprehensive_similarity(user_angles, user_previous_angles, coach_
             if len(angle_status_tracker[track_id][angle_name]) > CONSECUTIVE_FRAMES:
                 angle_status_tracker[track_id][angle_name].pop(0)
             
-            # 檢查是否連續5次都是低分
+            # 檢查是否在最近幾次中有70%都是低分
             recent_status = angle_status_tracker[track_id][angle_name]
             if len(recent_status) == CONSECUTIVE_FRAMES and all(recent_status):
-                # 連續5次低分，加入提醒訊息
-                angle_chinese = {
-                    'left_arm_angle': 'Left Arm', 'right_arm_angle': 'Right Arm',
-                    'trunk_angle': 'Trunk', 'head_tilt_angle': 'Head',
-                    'left_shoulder_angle': 'Left Shoulder', 'right_shoulder_angle': 'Right Shoulder',
-                    'left_knee_angle': 'Left Knee', 'right_knee_angle': 'Right Knee'
-                }
-                chinese_name = angle_chinese.get(angle_name, angle_name)
-                feedback_messages.append(f"{chinese_name}")
+                low_score_count = sum(recent_status)  # 計算True的數量
+                low_score_ratio = low_score_count / CONSECUTIVE_FRAMES
+                # 70%以上都是低分
+                if low_score_ratio >= 0.7:
+                    angle_chinese = {
+                        'left_arm_angle': 'Left Arm', 'right_arm_angle': 'Right Arm',
+                        'trunk_angle': 'Trunk', 'head_tilt_angle': 'Head',
+                        'left_shoulder_angle': 'Left Shoulder', 'right_shoulder_angle': 'Right Shoulder',
+                        'left_knee_angle': 'Left Knee', 'right_knee_angle': 'Right Knee'
+                    }
+                    chinese_name = angle_chinese.get(angle_name, angle_name)
+                    feedback_messages.append(f"{chinese_name}")
     # 將反饋訊息加入回傳結果
     all_scores['feedback_messages'] = feedback_messages
     return final_score, all_scores
 
 #==================== 主要程式開始 =====================
-cap = cv2.VideoCapture(0) # 鏡頭捕捉影片
+cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) # 鏡頭捕捉影片
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1080) # 設定解析度
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1920)
 cap.set(cv2.CAP_PROP_FPS, 30) # 設定幀率
+
+yolo_model = YOLO('yolov8n.pt')  # YOLO 初始化，使用輕量版模型，也可用 yolov8s.pt, yolov8m.pt
+mp_pose = mp.solutions.pose # mediapipe 姿勢偵測
+mp_drawing = mp.solutions.drawing_utils # mediapipe 繪圖方法
+mp_drawing_styles = mp.solutions.drawing_styles # mediapipe 繪圖樣式
 
 angle_status_tracker = {} # 全域變數 - 追蹤各角度的連續狀態
 user_previous_angles = {}  # {track_id: previous_angles}
@@ -316,10 +318,13 @@ coach_video_start_time = None
 SHOW_VISUAL = True  # 是否顯示視覺化窗口
 SAVE_SAMPLE_FRAMES = True  # 是否保存部分分析結果圖片
 current_timestamp = 0
+recording_frame_count = 0
 
 # 教練影片初始化（但不開始播放）
-coach_data = pd.read_csv(r"C:\Users\e6797\OneDrive\Desktop\VR虛擬教練\第一週-分析\手臂伸展分析.csv") # 教練的角度資料
-coach_video_path = r"C:\Users\e6797\OneDrive\Desktop\VR虛擬教練\第一週\手臂伸展_已剪輯.mp4"
+#coach_data = pd.read_csv(r"C:\Users\e6797\OneDrive\Desktop\VR虛擬教練\第一週-分析\手臂伸展分析.csv") # 教練的角度資料
+#coach_video_path = r"C:\Users\e6797\OneDrive\Desktop\VR虛擬教練\第一週\手臂伸展_已剪輯.mp4"
+coach_data = pd.read_csv(r"C:\Users\user\Desktop\VR虛擬教練\第一週-分析\手臂伸展分析.csv")
+coach_video_path = r"C:\Users\user\Desktop\VR虛擬教練\第一週\手臂伸展_已剪輯.mp4"
 coach_cap = cv2.VideoCapture(coach_video_path) 
 coach_fps = coach_cap.get(cv2.CAP_PROP_FPS)
 
@@ -335,7 +340,7 @@ else:
 # min_tracking_confidence 當已經鎖定人物後，用來判斷是否繼續追蹤的信心值。數值小追蹤較不穩定，容易重新檢測，反之
 # 穩定環境之坐姿運動(建議 0.7，0.5) 。光線不佳或多人環境(建議0.4，0.4)
 with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.8) as pose:
-    if not cap.isOpened(): # 無法開啟影片檔案
+    if not cap.isOpened():
         print("Cannot open camera")
         exit()
     
@@ -383,16 +388,24 @@ with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.8
         elif SYSTEM_STATE == "RECORDING":
             frame_people_data = []
             detailed_scores = {}
+
             # 開始記錄並播放教練影片
             if not recording_started:
                 recording_started = True
                 coach_video_start_time = time.time()
                 record_start_time = time.time()
+                frame_count = 0
                 coach_cap.set(cv2.CAP_PROP_POS_FRAMES, 0) # 重置影片到開頭
-            current_timestamp = time.time() - record_start_time
-            # 計算教練影片應該播放到第幾幀
+
+            recording_frame_count += 1 # 增加錄製幀計數器
+            # 使用固定幀率計算時間戳記，與教練資料對齊 
+            TARGET_FPS = 30
+            current_timestamp = recording_frame_count / TARGET_FPS  
+            
+            # 教練影片按實際時間播放（正常速度）
             coach_elapsed_time = time.time() - coach_video_start_time
             coach_frame_number = int(coach_elapsed_time * coach_fps)
+
             # 設定教練影片播放位置
             coach_cap.set(cv2.CAP_PROP_POS_FRAMES, coach_frame_number)
             coach_ret, coach_frame = coach_cap.read()
@@ -514,13 +527,13 @@ with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.8
                     messages = detailed_scores['feedback_messages'].split(',')
                 else:
                     feedback_messages = detailed_scores['feedback_messages']
+                current_time = time.time()  # 加入這行
 
                 # 將新訊息加入計時器（顯示5秒）
                 for message in feedback_messages:
                     feedback_display_timer[message] = current_time + 5.0
 
                 # 顯示所有還在計時器內的訊息
-                current_time = time.time()
                 active_messages = []
                 for message, end_time in list(feedback_display_timer.items()):
                     if current_time < end_time: 
@@ -535,7 +548,7 @@ with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.8
             cv2.imshow('Multi-Person Pose Analysis', display_frame)
             # 檢查視窗是否被關閉
             key = cv2.waitKey(1) & 0xFF
-            if key == ord('r'):  # 按 'r' 開始記錄
+            if key == ord('s'):  # 按 's' 開始記錄
                 if SYSTEM_STATE == "PREVIEW":
                     SYSTEM_STATE = "RECORDING"
                     recording_started = False

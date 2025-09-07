@@ -18,7 +18,7 @@ cap = cv2.VideoCapture(coach_video_path) # 將原本的鏡頭捕捉改成捕捉�
 # 設定視覺顯示參數
 SHOW_VISUAL = True  # 是否顯示視覺化窗口
 SAVE_SAMPLE_FRAMES = True  # 是否保存部分分析結果圖片
-SAMPLE_INTERVAL = 960  # 每480幀保存一張圖片
+SAMPLE_INTERVAL = 480  # 每480幀保存一張圖片
 
 # 存儲所有幀的姿勢數據
 pose_data = []
@@ -131,7 +131,7 @@ with mp_pose.Pose(min_detection_confidence = 0.7 , min_tracking_confidence = 0.7
                 
                 # 計算並顯示角度
                 if len(landmarks) >= 33:  # MediaPipe Pose 有33個關鍵點
-                    # 手臂角度（你已有的）
+                    # 手臂角度
                     left_shoulder = [landmarks[11].x, landmarks[11].y]
                     left_elbow = [landmarks[13].x, landmarks[13].y]
                     left_wrist = [landmarks[15].x, landmarks[15].y]
