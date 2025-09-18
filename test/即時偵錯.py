@@ -322,9 +322,13 @@ recording_frame_count = 0
 
 # 教練影片初始化（但不開始播放）
 #coach_data = pd.read_csv(r"C:\Users\e6797\OneDrive\Desktop\VR虛擬教練\第一週-分析\手臂伸展分析.csv") # 教練的角度資料
-#coach_video_path = r"C:\Users\e6797\OneDrive\Desktop\VR虛擬教練\第一週\手臂伸展_已剪輯.mp4"
-coach_data = pd.read_csv(r"C:\Users\user\Desktop\VR虛擬教練\第一週-分析\手臂伸展分析.csv")
-coach_video_path = r"C:\Users\user\Desktop\VR虛擬教練\第一週\手臂伸展_已剪輯.mp4"
+#coach_video_path = r"C:\Users\e6797\OneDrive\Desktop\VR虛擬教練\第一週\手臂伸展配合.mp4"
+#coach_data = pd.read_csv(r"C:\Users\user\Desktop\VR虛擬教練\第一週-分析\手臂伸展分析.csv")
+#coach_video_path = r"C:\Users\user\Desktop\VR虛擬教練\第一週\手臂伸展_已剪輯.mp4"
+coach_data = pd.read_csv(r"C:\Users\User\Desktop\VR虛擬教練\第一週-分析\手臂伸展分析.csv") # 教練的角度資料
+coach_video_path = r"C:\Users\User\Desktop\VR虛擬教練\第一週\手臂伸展配合.mp4"
+
+
 coach_cap = cv2.VideoCapture(coach_video_path) 
 coach_fps = coach_cap.get(cv2.CAP_PROP_FPS)
 
